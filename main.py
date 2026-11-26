@@ -8,7 +8,7 @@ from openai import OpenAI
 # Берем ключи из настроек Railway
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
-OPENAI_KEY = os.getenv("OPENAI_KEY") # <--- Новый ключ для распознавания голоса
+OPENAI_KEY = os.getenv("OPENAI_KEY") 
 
 logging.basicConfig(level=logging.INFO)
 
@@ -22,25 +22,21 @@ audio_client = OpenAI(api_key=OPENAI_KEY)
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-SYSTEM_PROMPT = """Ты — PincherLab, цифровое рекламное агентство полного цикла. Твоя команда состоит из виртуальных сотрудников. Ты общаешься с Владельцем.
-
-ТВОЯ СТРУКТУРА:
-1. Менеджер (Ты): Руководишь процессом, ведешь переговоры, задаешь вопросы (бриф), пишешь письма и финально передаешь результат.
-2. Креативный кластер:
-   - Креативный директор (ищет большие идеи, инсайты).
-   - Копирайтер (пишет слоганы, тексты, нейминг).
-   - Арт-директор (отвечает за визуальный стиль, референсы).
-   - Дизайнер (описывает, как будет выглядеть макет).
-
-ПРАВИЛА:
-1. Если Владелец пишет "Копирайтер: [задача]", отвечай только от лица Копирайтера.
-2. Если Владелец пишет "Креативный директор: [задача]", отвечай только от лица Креативного директора.
-3. Если Владелец пишет просто задачу, отвечай как Менеджер: задавай вопросы для брифа (цели, аудитория, бюджет), пока картина не станет ясной.
-4. Бриф заканчивается, когда ты понимаешь, что информации достаточно, ИЛИ когда Владелец говорит "Бриф окончен".
-5. Стиль общения: Профессиональный, но живой.
-"""
+# Базовый промпт
+SYSTEM_PROMPT = """Ты — PincherLab, цифровое рекламное агентство полного цикла. 
+Твоя команда: Менеджер (ты), Креативный директор, Копирайтер, Арт-директор и Дизайнер.
+Ты общаешься с Владельцем. Твоя задача: задавать вопросы (бриф) и выдавать креативные решения.
+Отвечай профессионально, но живо."""
 
 user_histories = {}
+
+# ФУНКЦИЯ ЧТЕНИЯ БАЗЫ ЗНАНИЙ
+def get_knowledge_base():
+    try:
+        with open("knowledge.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "База знаний пока пуста."
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -60,7 +56,7 @@ async def reset(message: types.Message):
     user_histories[message.from_user.id] = []
     await message.answer("🧹 Память очищена. Начинаем новый проект с чистого листа. Какая задача?")
 
-# НОВЫЙ ОБРАБОТЧИК ДЛЯ ГОЛОСОВЫХ
+# ОБРАБОТЧИК ГОЛОСОВЫХ
 @dp.message(lambda message: message.voice is not None)
 async def handle_voice(message: types.Message):
     user_id = message.from_user.id
@@ -70,7 +66,6 @@ async def handle_voice(message: types.Message):
     await message.answer("🎤 Слушаю голосовое, перевожу в текст...")
     
     try:
-        # Скачиваем файл из телеграма
         file_id = message.voice.file_id
         file = await bot.get_file(file_id)
         file_path = file.file_path
@@ -79,7 +74,6 @@ async def handle_voice(message: types.Message):
             await bot.download_file(file_path, temp_file.name)
             temp_file_name = temp_file.name
 
-        # Отправляем в OpenAI Whisper
         with open(temp_file_name, "rb") as audio_file:
             transcript = audio_client.audio.transcriptions.create(
                 model="whisper-1", 
@@ -90,14 +84,12 @@ async def handle_voice(message: types.Message):
         text_from_voice = transcript.text
         
         await message.answer(f"📝 Я услышал: «{text_from_voice}»\n\nКоманда думает над ответом...")
-        
-        # Дальше логика как с обычным текстом
         await process_text(message, text_from_voice, user_id)
 
     except Exception as e:
         await message.answer(f"Ошибка распознавания: {e}")
 
-# Обычный текст
+# ОБРАБОТЧИК ТЕКСТА
 @dp.message()
 async def handle_message(message: types.Message):
     user_id = message.from_user.id
@@ -107,10 +99,16 @@ async def handle_message(message: types.Message):
     await message.answer("Команда думает...")
     await process_text(message, message.text, user_id)
 
-# Общая функция для запроса в DeepSeek
+# ОБЩАЯ ФУНКЦИЯ С ЗАГРУЗКОЙ БАЗЫ ЗНАНИЙ
 async def process_text(message: types.Message, text: str, user_id: int):
     try:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Читаем файл knowledge.txt
+        knowledge = get_knowledge_base()
+        
+        # Формируем запрос, склеивая промпт и базу знаний
+        full_system_prompt = f"{SYSTEM_PROMPT}\n\nВот наша база знаний и правила, которые ты ОБЯЗАН учитывать:\n{knowledge}"
+        
+        messages = [{"role": "system", "content": full_system_prompt}]
         
         for msg in user_histories[user_id][-10:]:
             messages.append(msg)
