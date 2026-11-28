@@ -4,7 +4,7 @@ import tempfile
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from openai import OpenAI
-from pypdf import PdfReader  # <--- Новая библиотека для PDF
+from pypdf import PdfReader
 
 # Берем ключи из настроек Railway
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -50,7 +50,6 @@ async def reset(message: types.Message):
     user_histories[message.from_user.id] = []
     await message.answer("🧹 Память очищена. Начинаем новый проект. Какая задача?")
 
-# ОБРАБОТЧИК PDF
 @dp.message(lambda message: message.document and message.document.mime_type == "application/pdf")
 async def handle_pdf(message: types.Message):
     user_id = message.from_user.id
@@ -60,7 +59,6 @@ async def handle_pdf(message: types.Message):
     await message.answer("📄 Читаю PDF-файл, это может занять пару секунд...")
     
     try:
-        # Скачиваем файл
         file_id = message.document.file_id
         file = await bot.get_file(file_id)
         file_path = file.file_path
@@ -69,7 +67,6 @@ async def handle_pdf(message: types.Message):
             await bot.download_file(file_path, temp_file.name)
             temp_file_name = temp_file.name
 
-        # Читаем текст из PDF
         reader = PdfReader(temp_file_name)
         text_content = ""
         for page in reader.pages:
@@ -81,14 +78,12 @@ async def handle_pdf(message: types.Message):
             await message.answer("В этом PDF нет текста (возможно, это картинки). Я не могу его прочитать.")
             return
 
-        # Отправляем текст в DeepSeek
         prompt = f"Я отправил тебе PDF-файл. Вот его содержимое:\n\n{text_content[:8000]}\n\nПроанализируй этот документ и задай вопросы для брифа или выдай идеи."
         await process_text(message, prompt, user_id)
 
     except Exception as e:
         await message.answer(f"Ошибка чтения PDF: {e}")
 
-# ОБРАБОТЧИК ГОЛОСОВЫХ
 @dp.message(lambda message: message.voice is not None)
 async def handle_voice(message: types.Message):
     user_id = message.from_user.id
@@ -121,7 +116,6 @@ async def handle_voice(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка распознавания: {e}")
 
-# ОБРАБОТЧИК ТЕКСТА
 @dp.message()
 async def handle_message(message: types.Message):
     user_id = message.from_user.id
@@ -131,7 +125,6 @@ async def handle_message(message: types.Message):
     await message.answer("Команда думает...")
     await process_text(message, message.text, user_id)
 
-# ОБЩАЯ ФУНКЦИЯ
 async def process_text(message: types.Message, text: str, user_id: int):
     try:
         knowledge = get_knowledge_base()
@@ -154,7 +147,11 @@ async def process_text(message: types.Message, text: str, user_id: int):
         user_histories[user_id].append({"role": "user", "content": text})
         user_histories[user_id].append({"role": "assistant", "content": answer})
 
-        await message.answer(answer)
+        # Разбиваем длинный текст на части по 4000 символов
+        max_length = 4000
+        for i in range(0, len(answer), max_length):
+            chunk = answer[i:i + max_length]
+            await message.answer(chunk)
         
     except Exception as e:
         await message.answer(f"Ошибка мозга: {e}")
