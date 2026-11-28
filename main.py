@@ -3,11 +3,13 @@ import logging
 import tempfile
 import random
 import asyncio
-from datetime import datetime, time
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import FSInputFile
 from openai import OpenAI
 from pypdf import PdfReader
+import docx  # <--- Библиотека для Word
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
@@ -45,22 +47,32 @@ def get_knowledge_base():
     except FileNotFoundError:
         return "База знаний пока пуста."
 
+# --- СОЗДАНИЕ WORD-ФАЙЛА ---
+def create_word_document(text: str) -> str:
+    doc = docx.Document()
+    
+    # Разбиваем текст на абзацы и добавляем в документ
+    for paragraph in text.split('\n'):
+        if paragraph.strip():
+            doc.add_paragraph(paragraph)
+            
+    file_path = "report.docx"
+    doc.save(file_path)
+    return file_path
+
 # --- ФОНОВАЯ ЗАДАЧА (БУДИЛЬНИК) ---
 async def daily_report_scheduler():
     while True:
         now = datetime.now()
-        # Если сейчас 09:00 (и минуты равны 0), отправляем отчет
         if now.hour == 9 and now.minute == 0:
             await send_daily_report(ADMIN_ID)
-            # Ждем 60 секунд, чтобы не отправить отчет дважды в одну минуту
             await asyncio.sleep(60)
         else:
-            # Проверяем каждые 30 секунд, не наступило ли 9 утра
             await asyncio.sleep(30)
 
 async def send_daily_report(chat_id: int):
     topic = random.choice(TOPICS)
-    prompt = f"Ты — креативный директор агентства. Проведи исследование на тему: '{topic}'. Напиши краткий, но емкий отчет (до 1000 символов). Выдели 3 главных инсайта, которые мы можем применить в работе."
+    prompt = f"Ты — креативный директор агентства. Проведи исследование на тему: '{topic}'. Напиши краткий, но емкий отчет (до 1000 символов). Выдели 3 главных инсайта."
     
     try:
         response = client.chat.completions.create(
@@ -68,15 +80,14 @@ async def send_daily_report(chat_id: int):
             messages=[{"role": "user", "content": prompt}]
         )
         report = response.choices[0].message.content
-        text = f"☀️ *Утренний отчет PincherLab*\n\n*Тема исследования:* {topic}\n\n{report}"
+        text = f"☀️ *Утренний отчет PincherLab*\n\n*Тема:* {topic}\n\n{report}"
         
         max_length = 4000
         for i in range(0, len(text), max_length):
             chunk = text[i:i + max_length]
             await bot.send_message(chat_id, chunk, parse_mode="Markdown")
-            
     except Exception as e:
-        print(f"Ошибка при создании отчета: {e}")
+        print(f"Ошибка отчета: {e}")
 
 # --- КОМАНДЫ ---
 @dp.message(Command("id"))
@@ -88,12 +99,33 @@ async def manual_report(message: types.Message):
     await message.answer("🧠 Изучаю новые тренды и готовлю отчет...")
     await send_daily_report(message.from_user.id)
 
+@dp.message(Command("word"))
+async def get_word_report(message: types.Message):
+    await message.answer("📝 Готовлю для тебя документ Word...")
+    
+    # Берем последний ответ бота из памяти, чтобы сохранить его в файл
+    user_id = message.from_user.id
+    if user_id in user_histories and len(user_histories[user_id]) > 1:
+        last_answer = user_histories[user_id][-1]["content"]
+        file_path = create_word_document(last_answer)
+        
+        # Отправляем файл
+        document = FSInputFile(file_path, filename="PincherLab_Report.docx")
+        await message.answer_document(document, caption="Вот твой документ!")
+        
+        # Удаляем файл с сервера, чтобы не засорять память
+        os.remove(file_path)
+    else:
+        await message.answer("Я пока ничего не написал, чтобы сохранить в файл. Сначала задай мне задачу!")
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user_histories[message.from_user.id] = []
     await message.answer(
         "👋 Привет! Я твое ИИ-агентство *PincherLab*.\n\n"
-        "Теперь я умею слушать голосовые, читать PDF и присылать утренние отчеты в 09:00!",
+        "Я умею слушать, читать PDF и учиться новому.\n"
+        "— Напиши задачу или голосовое.\n"
+        "— Напиши /word, чтобы я прислал последний ответ файлом Word!",
         parse_mode="Markdown"
     )
 
@@ -178,11 +210,8 @@ async def process_text(message: types.Message, text: str, user_id: int):
     except Exception as e:
         await message.answer(f"Ошибка мозга: {e}")
 
-# --- ЗАПУСК ---
 async def main():
-    # Запускаем фоновую задачу с будильником
     asyncio.create_task(daily_report_scheduler())
-    # Запускаем бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
