@@ -18,7 +18,7 @@ DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
 GROQ_KEY = os.getenv("GROQ_KEY")
 
 ADMIN_ID = 7172384171 
-DATA_DIR = "/data" # Наша папка для сохранения
+DATA_DIR = "/data"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,12 +28,20 @@ audio_client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
+# ОБНОВЛЕННЫЙ СИСТЕМНЫЙ ПРОМПТ
 SYSTEM_PROMPT = """Ты — PincherLab, цифровое рекламное агентство полного цикла. 
-Твоя команда: Менеджер (ты), Креативный директор, Копирайтер, Арт-директор и Дизайнер.
-Ты общаешься с Владельцем. Твоя задача: задавать вопросы (бриф) и выдавать креативные решения.
-Отвечай профессионально, но живо."""
+Твоя команда состоит из профессионалов с именами:
+- Менеджер: Даша (Ведет проект, общается с клиентом, задает вопросы по брифу).
+- Креативный директор: Саша (Ищет большие идеи, инсайты).
+- Копирайтер: Паша (Пишет тексты, слоганы, нейминг).
+- Арт-директор: Наташа (Отвечает за визуальный стиль, референсы).
+- Дизайнер: Глаша (Описывает макеты).
+- SMM-менеджер, Таргетолог, Стратег (подключаются по запросу).
 
-# Активный клиент для каждого пользователя (в памяти)
+ПРАВИЛО РОЛЕЙ: Внимательно смотри на то, как к тебе обращается Владелец. Если он пишет "Саша, придумай...", "Паша, напиши...", "Даша, задай вопросы...", ты должен отвечать ИСКЛЮЧИТЕЛЬНО от лица этого специалиста (используя его экспертизу). Если Владелец просто ставит задачу, отвечай как Даша (Менеджер) и веди бриф.
+
+Твоя задача: решать бизнес-задачи клиента, а не просто угождать. Отвечай профессионально, но живо."""
+
 active_client = {}
 
 TOPICS = [
@@ -44,7 +52,6 @@ TOPICS = [
     "Визуальные тренды в дизайне: минимализм против максимализма"
 ]
 
-# --- БАЗА КЛИЕНТОВ ---
 def get_client_file(client_name):
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
@@ -88,7 +95,7 @@ async def daily_report_scheduler():
 
 async def send_daily_report(chat_id: int):
     topic = random.choice(TOPICS)
-    prompt = f"Ты — креативный директор агентства. Проведи исследование на тему: '{topic}'. Напиши краткий отчет (до 1000 символов). Выдели 3 главных инсайта."
+    prompt = f"Ты — Саша (Креативный директор). Проведи исследование на тему: '{topic}'. Напиши краткий отчет (до 1000 символов). Выдели 3 главных инсайта."
     try:
         response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
         report = response.choices[0].message.content
@@ -100,7 +107,6 @@ async def send_daily_report(chat_id: int):
     except Exception as e:
         print(f"Ошибка отчета: {e}")
 
-# --- КОМАНДЫ УПРАВЛЕНИЯ КЛИЕНТАМИ ---
 @dp.message(Command("clients"))
 async def list_clients(message: types.Message):
     if not os.path.exists(DATA_DIR):
@@ -122,7 +128,7 @@ async def new_client(message: types.Message):
     client_name = parts[1].strip()
     active_client[message.from_user.id] = client_name
     save_history(client_name, [])
-    await message.answer(f"✅ Клиент *{client_name}* создан и выбран. Теперь все сообщения пишутся в его карточку.", parse_mode="Markdown")
+    await message.answer(f"✅ Клиент *{client_name}* создан и выбран. Даша (Менеджер) готова к работе!", parse_mode="Markdown")
 
 @dp.message(Command("switch"))
 async def switch_client(message: types.Message):
@@ -137,14 +143,13 @@ async def switch_client(message: types.Message):
     else:
         await message.answer(f"Клиент *{client_name}* не найден. Создай его через /new_client", parse_mode="Markdown")
 
-# --- ОСТАЛЬНЫЕ КОМАНДЫ ---
 @dp.message(Command("id"))
 async def get_id(message: types.Message):
     await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
 @dp.message(Command("report"))
 async def manual_report(message: types.Message):
-    await message.answer("🧠 Изучаю новые тренды и готовлю отчет...")
+    await message.answer("🧠 Саша (Креативный директор) изучает новые тренды...")
     await send_daily_report(message.from_user.id)
 
 @dp.message(Command("word"))
@@ -171,6 +176,7 @@ async def start(message: types.Message):
     active_client[message.from_user.id] = None
     await message.answer(
         "👋 Привет! Я твое ИИ-агентство *PincherLab*.\n\n"
+        "Наша команда: Даша, Саша, Паша, Наташа, Глаша и другие.\n\n"
         "Для работы создай клиента: `/new_client Имя`\n"
         "Посмотреть всех: `/clients`\n"
         "Переключиться: `/switch Имя`\n\n"
@@ -187,7 +193,6 @@ async def reset(message: types.Message):
     else:
         await message.answer("🧹 Память очищена. Начинаем новый проект. Какая задача?")
 
-# --- ОБРАБОТЧИКИ ---
 @dp.message(lambda message: message.document and message.document.mime_type == "application/pdf")
 async def handle_pdf(message: types.Message):
     user_id = message.from_user.id
@@ -253,7 +258,7 @@ async def handle_message(message: types.Message):
     text = message.text.lower()
     
     if "нарисуй" in text or "сгенерируй" in text or "визуал" in text:
-        await message.answer("🎨 Арт-директор придумывает концепт...")
+        await message.answer("🎨 Наташа (Арт-директор) придумывает концепт...")
         prompt_for_ai = f"""
         Ты — арт-директор. Создай детальный промпт на английском языке для нейросети-художника. 
         Задача: нарисовать красивый визуал (фон, атмосферу, предметы) для рекламы. 
@@ -272,7 +277,7 @@ async def handle_message(message: types.Message):
             
             await message.answer_photo(
                 photo=image_url, 
-                caption=f"Визуальный концепт готов! 🎨\n\n_Промпт: {english_prompt}_", 
+                caption=f"Визуальный концепт от Наташи готов! 🎨\n\n_Промпт: {english_prompt}_", 
                 parse_mode="Markdown"
             )
             
@@ -284,7 +289,7 @@ async def handle_message(message: types.Message):
         except Exception as e:
             await message.answer(f"Ошибка рисования: {e}")
     else:
-        await message.answer("Команда думает...")
+        await message.answer("Даша (Менеджер) думает...")
         await process_text(message, message.text, user_id, client_name)
 
 async def process_text(message: types.Message, text: str, user_id: int, client_name: str):
