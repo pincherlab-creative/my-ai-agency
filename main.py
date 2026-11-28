@@ -3,10 +3,11 @@ import logging
 import tempfile
 import random
 import asyncio
+import urllib.parse
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import FSInputFile, URLInputFile
+from aiogram.types import FSInputFile
 from openai import OpenAI
 from pypdf import PdfReader
 import docx
@@ -56,7 +57,6 @@ def create_word_document(text: str) -> str:
     doc.save(file_path)
     return file_path
 
-# --- БУДИЛЬНИК ---
 async def daily_report_scheduler():
     while True:
         now = datetime.now()
@@ -80,7 +80,6 @@ async def send_daily_report(chat_id: int):
     except Exception as e:
         print(f"Ошибка отчета: {e}")
 
-# --- КОМАНДЫ ---
 @dp.message(Command("id"))
 async def get_id(message: types.Message):
     await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
@@ -101,17 +100,16 @@ async def get_word_report(message: types.Message):
         await message.answer_document(document, caption="Вот твой документ!")
         os.remove(file_path)
     else:
-        await message.answer("Я пока ничего не написал, чтобы сохранить в файл. Сначала задай мне задачу!")
+        await message.answer("Я пока ничего не написал. Сначала задай мне задачу!")
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user_histories[message.from_user.id] = []
     await message.answer(
         "👋 Привет! Я твое ИИ-агентство *PincherLab*.\n\n"
-        "Я умею слушать, читать PDF, писать в Word и рисовать картинки! 🎨\n"
         "— Напиши задачу или голосовое.\n"
         "— Напиши /word, чтобы я прислал последний ответ файлом.\n"
-        "— Напиши _«Нарисуй: [описание]»_, и я сгенерирую картинку!",
+        "— Напиши _«Нарисуй визуал: [описание]»_, и я сгенерирую концепт для баннера!",
         parse_mode="Markdown"
     )
 
@@ -120,7 +118,6 @@ async def reset(message: types.Message):
     user_histories[message.from_user.id] = []
     await message.answer("🧹 Память очищена. Начинаем новый проект. Какая задача?")
 
-# --- ОБРАБОТЧИКИ ---
 @dp.message(lambda message: message.document and message.document.mime_type == "application/pdf")
 async def handle_pdf(message: types.Message):
     user_id = message.from_user.id
@@ -169,7 +166,7 @@ async def handle_voice(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка распознавания: {e}")
 
-# --- ГЕНЕРАЦИЯ КАРТИНКИ ---
+# --- УЛУЧШЕННАЯ ГЕНЕРАЦИЯ ВИЗУАЛА ---
 @dp.message()
 async def handle_message(message: types.Message):
     user_id = message.from_user.id
@@ -178,12 +175,18 @@ async def handle_message(message: types.Message):
     
     text = message.text.lower()
     
-    # Если пользователь просит нарисовать
-    if "нарисуй" in text or "сгенерируй" in text or "картинку" in text:
-        await message.answer("🎨 Арт-директор придумывает концепт...")
+    # Если просят нарисовать визуал
+    if "нарисуй визуал" in text or "сгенерируй визуал" in text or "нарисуй" in text:
+        await message.answer("🎨 Арт-директор придумывает концепт (без текста, чтобы было красиво)...")
         
-        # Просим DeepSeek перевести запрос в хороший промпт для картинки на английском
-        prompt_for_ai = f"Переведи следующий запрос в детальный промпт для нейросети-художника на английском языке. Ответь ТОЛЬКО английским текстом промпта, без лишних слов. Запрос: {message.text}"
+        # Просим нейросеть сделать акцент на визуале, БЕЗ текста
+        prompt_for_ai = f"""
+        Ты — арт-директор. Создай детальный промпт на английском языке для нейросети-художника. 
+        Задача: нарисовать красивый визуал (фон, атмосферу, предметы) для рекламы. 
+        ВАЖНО: НИКАКОГО ТЕКСТА, букв или надписей на картинке. Только визуальный образ.
+        Запрос клиента: {message.text}
+        Ответь ТОЛЬКО английским текстом промпта.
+        """
         try:
             response = client.chat.completions.create(
                 model="deepseek-chat",
@@ -191,16 +194,18 @@ async def handle_message(message: types.Message):
             )
             english_prompt = response.choices[0].message.content.strip()
             
-            # Кодируем для URL
-            import urllib.parse
             encoded_prompt = urllib.parse.quote(english_prompt)
-            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&model=flux"
             
-            await message.answer_photo(photo=image_url, caption=f"Вот концепт! \n\n_Промпт: {english_prompt}_", parse_mode="Markdown")
+            # Отправляем картинку и просим нейросеть придумать слоган
+            await message.answer_photo(
+                photo=image_url, 
+                caption=f"Визуальный концепт готов! 🎨\n\n_Промпт: {english_prompt}_\n\nТеперь напиши мне, какой текст или слоган наложить на этот фон, и я его придумаю.", 
+                parse_mode="Markdown"
+            )
             
-            # Сохраняем в историю
             user_histories[user_id].append({"role": "user", "content": message.text})
-            user_histories[user_id].append({"role": "assistant", "content": f"[Сгенерирована картинка] {english_prompt}"})
+            user_histories[user_id].append({"role": "assistant", "content": f"[Сгенерирован визуал] {english_prompt}"})
             
         except Exception as e:
             await message.answer(f"Ошибка рисования: {e}")
