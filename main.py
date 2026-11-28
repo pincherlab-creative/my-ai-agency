@@ -1,6 +1,8 @@
 import os
 import logging
 import tempfile
+import asyncio
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from openai import OpenAI
@@ -9,7 +11,7 @@ from pypdf import PdfReader
 # Берем ключи из настроек Railway
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
-GROQ_KEY = os.getenv("GROQ_KEY") # <--- Новый ключ для голоса
+GROQ_KEY = os.getenv("GROQ_KEY")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,12 +31,18 @@ SYSTEM_PROMPT = """Ты — PincherLab, цифровое рекламное аг
 
 user_histories = {}
 
+# ФУНКЦИЯ ЧТЕНИЯ БАЗЫ ЗНАНИЙ
 def get_knowledge_base():
     try:
         with open("knowledge.txt", "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return "База знаний пока пуста."
+
+# КОМАНДА ДЛЯ ПОЛУЧЕНИЯ ID
+@dp.message(Command("id"))
+async def get_id(message: types.Message):
+    await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -106,7 +114,6 @@ async def handle_voice(message: types.Message):
             temp_file_name = temp_file.name
 
         with open(temp_file_name, "rb") as audio_file:
-            # Используем модель whisper-large-v3 от Groq
             transcript = audio_client.audio.transcriptions.create(
                 model="whisper-large-v3", 
                 file=audio_file
