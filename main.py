@@ -1,8 +1,9 @@
 import os
 import logging
 import tempfile
+import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, time
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from openai import OpenAI
@@ -13,12 +14,14 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEY")
 GROQ_KEY = os.getenv("GROQ_KEY")
 
+# ТВОЙ ID (чтобы бот знал, кому писать)
+ADMIN_ID = 7172384171 
+
 logging.basicConfig(level=logging.INFO)
 
 # Мозг (DeepSeek)
 client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
-
-# Уши (Groq - бесплатно)
+# Уши (Groq)
 audio_client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -31,7 +34,15 @@ SYSTEM_PROMPT = """Ты — PincherLab, цифровое рекламное аг
 
 user_histories = {}
 
-# ФУНКЦИЯ ЧТЕНИЯ БАЗЫ ЗНАНИЙ
+# Темы для самообразования
+TOPICS = [
+    "Современные тренды в диджитал-рекламе 2024-2025",
+    "Как работают лучшие рекламные кампании на фестивале Каннские Львы",
+    "Психология потребителя: почему люди покупают",
+    "Нейминг: как создавать бренды, которые запоминаются",
+    "Визуальные тренды в дизайне: минимализм против максимализма"
+]
+
 def get_knowledge_base():
     try:
         with open("knowledge.txt", "r", encoding="utf-8") as f:
@@ -44,14 +55,42 @@ def get_knowledge_base():
 async def get_id(message: types.Message):
     await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
+# КОМАНДА ДЛЯ УТРЕННЕГО ОТЧЕТА (РУЧНОЙ ЗАПУСК)
+@dp.message(Command("report"))
+async def manual_report(message: types.Message):
+    await message.answer("🧠 Изучаю новые тренды и готовлю отчет...")
+    await send_daily_report(message.from_user.id)
+
+# ФУНКЦИЯ ОТПРАВКИ ОТЧЕТА
+async def send_daily_report(chat_id: int):
+    topic = random.choice(TOPICS)
+    prompt = f"Ты — креативный директор агентства. Проведи исследование на тему: '{topic}'. Напиши краткий, но емкий отчет (до 1000 символов). Выдели 3 главных инсайта, которые мы можем применить в работе."
+    
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        report = response.choices[0].message.content
+        
+        text = f"☀️ *Утренний отчет PincherLab*\n\n*Тема исследования:* {topic}\n\n{report}"
+        
+        # Разбиваем на части, если длинно
+        max_length = 4000
+        for i in range(0, len(text), max_length):
+            chunk = text[i:i + max_length]
+            await bot.send_message(chat_id, chunk, parse_mode="Markdown")
+            
+    except Exception as e:
+        await bot.send_message(chat_id, f"Ошибка при создании отчета: {e}")
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user_histories[message.from_user.id] = []
     await message.answer(
         "👋 Привет! Я твое ИИ-агентство *PincherLab*.\n\n"
-        "Теперь я умею понимать не только текст, но и *голосовые сообщения*! 🎤\n"
-        "— Напиши задачу или отправь голосовое.\n"
-        "— Для нового проекта: /reset.",
+        "Я умею слушать голосовые, читать PDF и учиться новому.\n"
+        "Напиши /report, чтобы я изучил новые тренды и выдал отчет!",
         parse_mode="Markdown"
     )
 
@@ -95,7 +134,7 @@ async def handle_pdf(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка чтения PDF: {e}")
 
-# ОБРАБОТЧИК ГОЛОСА (Через Groq)
+# ОБРАБОТЧИК ГОЛОСА
 @dp.message(lambda message: message.voice is not None)
 async def handle_voice(message: types.Message):
     user_id = message.from_user.id
