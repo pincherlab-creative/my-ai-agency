@@ -4,6 +4,7 @@ import tempfile
 import random
 import asyncio
 import urllib.parse
+import aiohttp
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -109,7 +110,7 @@ async def start(message: types.Message):
         "👋 Привет! Я твое ИИ-агентство *PincherLab*.\n\n"
         "— Напиши задачу или голосовое.\n"
         "— Напиши /word, чтобы я прислал последний ответ файлом.\n"
-        "— Напиши _«Нарисуй визуал: [описание]»_, и я сгенерирую концепт для баннера!",
+        "— Напиши _«Нарисуй визуал: [описание]»_, и я сгенерирую концепт!",
         parse_mode="Markdown"
     )
 
@@ -166,7 +167,7 @@ async def handle_voice(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка распознавания: {e}")
 
-# --- УЛУЧШЕННАЯ ГЕНЕРАЦИЯ ВИЗУАЛА ---
+# --- УЛУЧШЕННАЯ ГЕНЕРАЦИЯ ВИЗУАЛА (СО СКАЧИВАНИЕМ) ---
 @dp.message()
 async def handle_message(message: types.Message):
     user_id = message.from_user.id
@@ -175,11 +176,9 @@ async def handle_message(message: types.Message):
     
     text = message.text.lower()
     
-    # Если просят нарисовать визуал
     if "нарисуй визуал" in text or "сгенерируй визуал" in text or "нарисуй" in text:
-        await message.answer("🎨 Арт-директор придумывает концепт (без текста, чтобы было красиво)...")
+        await message.answer("🎨 Арт-директор придумывает концепт...")
         
-        # Просим нейросеть сделать акцент на визуале, БЕЗ текста
         prompt_for_ai = f"""
         Ты — арт-директор. Создай детальный промпт на английском языке для нейросети-художника. 
         Задача: нарисовать красивый визуал (фон, атмосферу, предметы) для рекламы. 
@@ -195,15 +194,29 @@ async def handle_message(message: types.Message):
             english_prompt = response.choices[0].message.content.strip()
             
             encoded_prompt = urllib.parse.quote(english_prompt)
+            # Используем модель flux для качества
             image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&model=flux"
             
-            # Отправляем картинку и просим нейросеть придумать слоган
-            await message.answer_photo(
-                photo=image_url, 
-                caption=f"Визуальный концепт готов! 🎨\n\n_Промпт: {english_prompt}_\n\nТеперь напиши мне, какой текст или слоган наложить на этот фон, и я его придумаю.", 
-                parse_mode="Markdown"
-            )
-            
+            # Скачиваем картинку на сервер
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url, timeout=60) as resp:
+                    if resp.status == 200:
+                        img_data = await resp.read()
+                        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_img:
+                            temp_img.write(img_data)
+                            temp_img_name = temp_img.name
+                        
+                        # Отправляем как файл
+                        photo = FSInputFile(temp_img_name, filename="concept.jpg")
+                        await message.answer_photo(
+                            photo=photo, 
+                            caption=f"Визуальный концепт готов! 🎨\n\n_Промпт: {english_prompt}_\n\nТеперь напиши мне, какой текст наложить на этот фон.", 
+                            parse_mode="Markdown"
+                        )
+                        os.remove(temp_img_name)
+                    else:
+                        await message.answer("Не удалось скачать картинку. Попробуй еще раз.")
+                        
             user_histories[user_id].append({"role": "user", "content": message.text})
             user_histories[user_id].append({"role": "assistant", "content": f"[Сгенерирован визуал] {english_prompt}"})
             
